@@ -8,6 +8,39 @@ voice with two LFOs, its own MPC screen skin, and Q-Links.
 Loaded by MPC's own built-in plugin host. Add it to a track like any other
 instrument plugin and play it from pads, keys or a MIDI clip.
 
+## Features
+
+A monophonic voice modeled on the Moog Labyrinth's signal path, with the
+Force/Schwung LFO and randomiser layer built on top:
+
+- **Thru-zero FM pair**: a sine VCO tracked by key, plus a triangle Mod
+  oscillator with its own key-track and pitch EG, FM'd into the VCO
+  (`fm_depth`/`fm_eg1`) for the Labyrinth's characteristic bell/clang tones.
+  A ring-mod tap (VCO × Mod) sits alongside the VCO/Mod/noise mixer.
+- **Wavefolder**: drive + bias fold on the mixed signal, with its own pitch
+  EG and key tracking, and a **Route** switch (`VCW>VCF`, `Parallel`,
+  `VCF>VCW`) that decides whether the folder feeds the filter, the filter
+  feeds the folder, or they run in parallel and get crossfaded with
+  **Blend**.
+- **State-variable filter**: a Cytomic/Simper TPT (zero-delay-feedback) SVF
+  that morphs continuously lowpass → bandpass (no highpass tap — the real
+  Labyrinth only sweeps LP↔BP), with resonance running from Butterworth-flat
+  up to near self-oscillation, nonlinear saturation on the resonant feedback
+  path so the peak blooms instead of ringing linearly, and its own Filt
+  Drive stage (bypass-at-zero gain-into-tanh) feeding the filter input.
+- **Output stage**: a Boss-style asymmetric-clip Tone/Sat saturator on the
+  way out, plus warm per-channel mixer overdrive on the VCO/Mod/noise taps.
+- **Two tempo-syncable LFOs**: 5 shapes (saw/tri/sine/square/S&H), free-run
+  or clock-synced (1/16 to 8 bars), optional retrigger, each independently
+  routed to 9 destinations (VCO/Mod pitch, FM depth, cutoff, both envelope
+  decays, filter drive, fold amount, fold bias).
+- **Page randomiser**: four latching per-page toggles (Voice / WaveFolder /
+  Filter / Tone) plus a momentary Generate button that randomises every
+  armed page's parameters at once, so you can lock in a section (say, the
+  filter) while rolling the rest.
+- **63 parameters**, all reachable from Q-Links across three MPC screen
+  tabs — no menu-diving mid-performance.
+
 ## What it is
 
 - **Engine**: `src/maze_voice.c`, the same DSP core as the
