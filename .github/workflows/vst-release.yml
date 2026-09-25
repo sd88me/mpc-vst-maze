@@ -1,0 +1,31 @@
+# Build Maze Voice's MPC VST plugin into a DRAFT release (maze-voice-vst-v<version>) with
+# mpc-vst-plugins' shared workflow: Actions -> "VST release (draft)" -> Run workflow. Then install
+# that draft's zip on a device, smoke-test it, and publish the draft (see mpc-vst-plugins
+# docs/RELEASING.md). dry_run builds the zip and skin previews as run artifacts only.
+name: VST release (draft)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Maze Voice VST version, e.g. 1.0.1
+        required: true
+      dry_run:
+        description: Build only (zip + skin previews as run artifacts), no draft release
+        type: boolean
+        default: false
+
+jobs:
+  maze-voice:
+    uses: sd88me/mpc-vst-plugins/.github/workflows/vst-release.yml@47ef6b27c61ec3f3a3d9e867d330651ee34b7a20
+    permissions:
+      contents: write
+    with:
+      tag: maze-voice-vst-v${{ inputs.version }}
+      version: ${{ inputs.version }}
+      tools_ref: 47ef6b27c61ec3f3a3d9e867d330651ee34b7a20
+      vst_dir: vst
+      build: vst/build.sh
+      host_test: '"$MPC_VST/tools/test_port.sh" vst/vst.json'
+      about: A wavefolding, FM-capable mono synth voice (port of the Maze Voice Schwung module).
+      dry_run: ${{ inputs.dry_run }}
