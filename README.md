@@ -16,7 +16,8 @@ Force/Schwung LFO and randomiser layer built on top:
 - **Thru-zero FM pair**: a sine VCO tracked by key, plus a triangle Mod
   oscillator with its own key-track and pitch EG, FM'd into the VCO
   (`fm_depth`/`fm_eg1`) for the Labyrinth's characteristic bell/clang tones.
-  A ring-mod tap (VCO × Mod) sits alongside the VCO/Mod/noise mixer.
+  A ring-mod tap (VCO × Mod) and a variable-tone (dark↔bright) noise
+  generator sit alongside them in the VCO/Mod/noise mixer.
 - **Wavefolder**: drive + bias fold on the mixed signal, with its own pitch
   EG and key tracking, and a **Route** switch (`VCW>VCF`, `Parallel`,
   `VCF>VCW`) that decides whether the folder feeds the filter, the filter
@@ -38,6 +39,10 @@ Force/Schwung LFO and randomiser layer built on top:
   Filter / Tone) plus a momentary Generate button that randomises every
   armed page's parameters at once, so you can lock in a section (say, the
   filter) while rolling the rest.
+- **External Voice mode**: an alternate output tap (`out_mode`) that sends
+  the raw, post-wavefolder oscillator mix out ungated and unfiltered (no
+  blend, no VCA envelope, no filter) — for feeding an external filter or
+  amp chain instead of the built-in filter/VCA path.
 - **63 parameters**, all reachable from Q-Links across three MPC screen
   tabs — no menu-diving mid-performance.
 
