@@ -17,13 +17,13 @@ on:
 
 jobs:
   maze-voice:
-    uses: sd88me/mpc-vst-plugins/.github/workflows/vst-release.yml@0ca49f96b702be84076c29691fefac1d3f5c05b4
+    uses: sd88me/mpc-vst-plugins/.github/workflows/vst-release.yml@9e56aa2a70f6731afe6800809da5a38ddc62630d
     permissions:
       contents: write
     with:
       tag: maze-voice-vst-v${{ inputs.version }}
       version: ${{ inputs.version }}
-      tools_ref: 0ca49f96b702be84076c29691fefac1d3f5c05b4
+      tools_ref: 9e56aa2a70f6731afe6800809da5a38ddc62630d
       vst_dir: vst
       build: vst/build.sh
       host_test: '"$MPC_VST/tools/test_port.sh" vst/vst.json'
