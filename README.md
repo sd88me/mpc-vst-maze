@@ -87,8 +87,9 @@ MPC_VST=/path/to/mpc-vst-plugins ./vst/build.sh
 
 The build writes these files to `vst/build/`:
 
-- `maze_voice.so`: the plugin, which goes in `/sdcard/vst/`.
-- `skin/sd88me - VST - Maze Voice/`: the skin, which goes in `/sdcard/Synths/`.
+- `maze_voice.so`: the plugin.
+- `skin/sd88me - VST - Maze Voice/`: the skin. The plugin and its skin are one folder in `/sdcard/Synths/`; the release
+  workflow (or `tools/release.py` in mpc-vst-plugins) packages them with an installer.
 - `pluginlist-entry.xml`: the `<PLUGIN>` line for `pluginList-arm` in `MPC.settings`.
 
 To test the build offline on x86 (ASan/UBSan, no device needed), run:
