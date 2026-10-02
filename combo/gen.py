@@ -88,7 +88,7 @@ dst = os.path.join(here, "images")
 os.makedirs(dst, exist_ok=True)
 for d in (os.path.join(root, "vst", "images"), os.path.join(root, "sequencer", "vst", "images")):
     for f in os.listdir(d):
-        if f.endswith(".png"):
+        if f.endswith(".png") and "5frames" not in f:
             shutil.copy(os.path.join(d, f), os.path.join(dst, f))
 shutil.copy(os.path.join(root, "vst", "skin.css"), os.path.join(here, "skin.css"))
 print("combo: %d params, %d seq tabs + %d voice tabs" % (2 + len(sq) + len(voice), len(seq_tabs), len(voice_tabs)))
