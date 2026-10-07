@@ -555,6 +555,22 @@ static void maze_set_param(void *inst, const char *key, const char *val){
     else if (!strcmp(key,"pad_semis")){ L->pad_semis=(v<-60?-60:(v>60?60:v)); set_root_from_key(L); }
 #ifdef MAZE_VST   /* MPC-VST-ONLY */
     else if (!strcmp(key,"host_bpm")){ float b=(float)atof(val); if (b>=20.0f && b<=300.0f) L->lfoBpm=b; }
+    else if (!strcmp(key,"song_pulse")){
+        /* MPC-VST-ONLY: anchor the pulse counter to the song position. val = index of the 0xF8 about to arrive (ppq*24), so
+           `pulse % RATE_PULSES` -- and the reset-every-N-bars counter -- are functions of the song position, not of how many
+           pulses happened to arrive since Start. A playing note keeps its length (off_pulse is rebased). */
+        long m=atol(val); if (m<0) m=0;
+        long np=m-1;
+        for (int i=0;i<2;i++){
+            seq_t *q=&L->s[i];
+            if (q->note_active){ long rem=q->off_pulse-L->pulse; if (rem<1) rem=1; q->off_pulse=np+rem; }
+            if (q->reset_bars>0){
+                int thresh=q->reset_bars*(PULSES_PER_BAR/RATE_PULSES[L->rate]);
+                if (thresh>0) q->reset_ctr=(int)((m/RATE_PULSES[L->rate])%thresh);
+            }
+        }
+        L->pulse=np;
+    }
     else if (!strcmp(key,"s1_regen")||!strcmp(key,"s2_regen")){
         seq_t *q=&L->s[key[1]=='2'?1:0]; int len=q->length, ch=q->channel, cr=q->corrupt, rg=q->cv_range, rb=q->reset_bars;
         seq_randomize(q); q->length=len; q->channel=ch; q->corrupt=cr; q->cv_range=rg; q->reset_bars=rb;
