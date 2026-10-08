@@ -19,4 +19,9 @@ unchanged) and marked `MPC-VST-ONLY`:
 5. **`s1_adv` / `s2_adv`**: rotate that line's pattern (gates and CV of its active steps) one step forward per press,
    also while stopped. The Force build's version only moves the play-head, which is inaudible when stopped.
 
-Re-vendor by diffing against force-maze's `src/` at a newer commit and re-applying these five.
+6. **`song_pulse`**: anchor the pulse counter (and the reset-every-N-bars counter) to the song position, so steps follow the
+   host's `ppqPos` instead of the number of pulses since Start. The wrapper sets it at Start, after a loop wrap / locate and once
+   per bar (`vst/transport_grid.h`). A first Start at the top now lands the first step on the downbeat; counting from Start put it
+   one pulse early relative to the song grid.
+
+Re-vendor by diffing against force-maze's `src/` at a newer commit and re-applying these six.

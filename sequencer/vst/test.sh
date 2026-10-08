@@ -10,5 +10,8 @@ docker run --rm -v "$PWD/..":/w -w /w/vst gcc:12 bash -euxc '
   gcc -O0 -g -fsanitize=address,undefined -std=gnu11 -Ibuild -c host_test.c -o /tmp/t/host_test.o
   g++ -fsanitize=address,undefined -o /tmp/t/mtest /tmp/t/core.o /tmp/t/vst.o /tmp/t/host_test.o -lasound -lpthread -lm
   /tmp/t/mtest
+  g++ -O0 -g -fsanitize=address,undefined -std=c++17 -Wall -Wextra -I../src -c grid_test.cpp -o /tmp/t/grid_test.o
+  g++ -fsanitize=address,undefined -o /tmp/t/gtest /tmp/t/core.o /tmp/t/grid_test.o -lm
+  /tmp/t/gtest
 '
 echo "PASSED"

@@ -33,6 +33,7 @@ extern "C" {
 }
 #include "params.h"
 #include "popup.h"    /* mpc-vst-plugins wrapper/popup.h, copied into build/ by build.sh */
+#include "transport_grid.h"   /* song-position anchored clock: why and how in that header */
 
 /* ---- VST2 ABI (hand-written; no Steinberg SDK) ---------------------------- */
 struct AEffect;
@@ -108,8 +109,7 @@ struct Plugin {
     volatile int release[NPARAMS] = {0};
     bool held[NPARAMS] = {false};  /* momentary params: host currently reports them pressed */
     float open[NPARAMS] = {0};     /* popup "open" flags (popup.h): wrapper-only, not saved */
-    double last_ppq = 0.0;
-    bool was_playing = false;
+    TransportGrid grid;   /* song-position anchored clock (transport_grid.h) */
     float sent_bpm = 0.0f;
     snd_seq_t *seq = nullptr;
     int seq_port = -1;
@@ -243,7 +243,14 @@ static void apply(Plugin *w, int i, float v) {
  * Transport / clock synthesis: audioMasterGetTime -> a 24-PPQN clock, the same byte stream
  * host_shim.cpp fed the core from real MIDI clock. Once per audio block.
  * ------------------------------------------------------------------------- */
-static void feed_transport(Plugin *w) {
+struct CoreClock {
+    Plugin *w;
+    void start() { core_midi(w, 0xFA); }
+    void stop() { core_midi(w, 0xFC); }
+    void songpos(long m) { char b[24]; std::snprintf(b, sizeof b, "%ld", m); core_set(w, "song_pulse", b); }
+    void pulse(long) { core_midi(w, 0xF8); }
+};
+static void feed_transport(Plugin *w, int32_t frames) {
     VstTimeInfo *ti = (VstTimeInfo *)w->master(&w->fx, audioMasterGetTime, 0, kVstTempoValid | kVstPpqPosValid, 0, 0);
     bool playing = ti && (ti->flags & kVstTransportPlaying);
     if (ti && (ti->flags & kVstTempoValid) && ti->tempo >= 20 && std::fabs((float)ti->tempo - w->sent_bpm) > 0.01f) {
@@ -252,18 +259,8 @@ static void feed_transport(Plugin *w) {
         w->sent_bpm = (float)ti->tempo;
         core_set(w, "host_bpm", b);   /* LFO sync tempo (MAZE_VST patch) */
     }
-    if (playing && !w->was_playing) { w->last_ppq = ti->ppqPos; core_midi(w, 0xFA); }
-    else if (!playing && w->was_playing) core_midi(w, 0xFC);
-    w->was_playing = playing;
-
-    if (playing && ti) {
-        const double step = 1.0 / 24.0;   /* 24 PPQN, in quarter notes */
-        double start = w->last_ppq, end = ti->ppqPos;
-        if (end < start || end - start > 1.0) start = end;   /* loop/rewind/jump: resync, don't flood pulses */
-        double next = std::ceil(start / step) * step;
-        for (; next < end + 1e-9; next += step) core_midi(w, 0xF8);
-        w->last_ppq = ti->ppqPos;
-    }
+    CoreClock clk{w};
+    w->grid.block(clk, playing, ti ? ti->ppqPos : 0.0, ti ? ti->tempo : 120.0, ti ? ti->sampleRate : 44100.0, frames);
 }
 
 /* ---------------------------------------------------------------------------
@@ -272,7 +269,7 @@ static void feed_transport(Plugin *w) {
 static void processReplacing(AEffect *e, float **in, float **out, int32_t n) {
     (void)in;
     Plugin *w = (Plugin *)e->object;
-    feed_transport(w);
+    feed_transport(w, n);
     for (int n2 = 0; n2 < 2; n2++) {
         /* The host does not re-read a toggle or ring by itself, so push what changed on its own (jv880's highlight
          * mechanism): the running light as the play-head moves, and step LEDs when the pattern changes (Advance,
@@ -285,7 +282,7 @@ static void processReplacing(AEffect *e, float **in, float **out, int32_t n) {
         }
         int ri = w->run_idx[n2];
         if (ri < 0) continue;
-        float v = w->was_playing && pl >= 0 && pl < 8 ? (float)(pl + 1) : 0.0f;
+        float v = w->grid.was_playing && pl >= 0 && pl < 8 ? (float)(pl + 1) : 0.0f;
         if (v != w->cache[ri]) {
             w->cache[ri] = v;
             w->master(&w->fx, audioMasterAutomate, ri, 0, 0, to_norm(&PARAMS[ri], v));
