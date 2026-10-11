@@ -33,6 +33,7 @@ enum { kPlaying = 1 << 1, kPpq = 1 << 9, kTempo = 1 << 10 };
 
 extern AEffect *VSTPluginMain(cb);
 extern int maze_vst_note_ons(int ch);
+extern int maze_vst_pad_semis(AEffect *e);
 
 static TI g_ti;
 static int automated[NPARAMS];
@@ -150,6 +151,15 @@ int main(void) {
         CHECK(opened && kept && closed, "popup %s: opens %d, nudge keeps it open %d, pick closes it %d", PARAMS[i].key, opened, kept, closed);
     }
 
+    /* a played note transposes (semitones from C4); the plugin's own echoed note-ons must not */
+    { typedef struct { int32_t type, byteSize, deltaFrames, flags, noteLength, noteOffset; uint8_t midiData[4]; int8_t detune, noteOffVelocity, r1, r2; } ME;
+      typedef struct { int32_t numEvents; intptr_t reserved; ME *events[1]; } EV;   /* same layout as the plugin's VstEvents */
+      ME me = { 1, sizeof(ME), 0, 0, 0, 0, {0x90, 67, 100, 0}, 0, 0, 0, 0 }; EV ev = { 1, 0, { &me } };
+      a->d(a, 25, 0, 0, &ev, 0);
+      CHECK(maze_vst_pad_semis(a) == 7, "note 67 -> transpose %d (expect 7)", maze_vst_pad_semis(a));
+      me.midiData[1] = 48; a->d(a, 25, 0, 0, &ev, 0);
+      CHECK(maze_vst_pad_semis(a) == -12, "note 48 -> transpose %d (expect -12)", maze_vst_pad_semis(a));
+      void *ci = 0; (void)ci; }
     /* chunk round-trip: parameters AND the pattern (bits + CV) */
     void *chunk = 0;
     intptr_t n = a->d(a, 23, 0, 0, &chunk, 0);
