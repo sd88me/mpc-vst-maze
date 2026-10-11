@@ -54,6 +54,13 @@ struct AEffect {
     void (*processDoubleReplacing)(AEffect *, double **, double **, int32_t);
     char future[56];
 };
+typedef struct { int32_t type, byteSize, deltaFrames, flags; char data[16]; } VstEvent;
+typedef struct {
+    int32_t type, byteSize, deltaFrames, flags, noteLength, noteOffset;
+    unsigned char midiData[4];
+    char detune, noteOffVelocity, reserved1, reserved2;
+} VstMidiEvent;
+typedef struct { int32_t numEvents; intptr_t reserved; VstEvent *events[64]; } VstEvents;
 typedef struct {
     double samplePos, sampleRate, nanoSeconds, ppqPos, tempo, barStartPos, cycleStartPos, cycleEndPos;
     int32_t timeSigNumerator, timeSigDenominator, smpteOffset, smpteFrameRate, samplesToNextClock, flags;
@@ -91,6 +98,7 @@ static FILE *g_log;
 #ifdef MAZE_VST_TEST   /* host_test.c: what went out, without an ALSA device */
 static std::atomic<int> g_note_ons[16];
 extern "C" int maze_vst_note_ons(int ch) { return g_note_ons[ch & 15].load(); }
+
 #endif
 
 /* ---------------------------------------------------------------------------
@@ -114,6 +122,8 @@ struct Plugin {
     snd_seq_t *seq = nullptr;
     int seq_port = -1;
     char chunk[4096] = {0};
+    uint8_t sent_ring[16][2] = {{0}};   /* our last note messages: MPC's input monitor loops them back as VstMidiEvents */
+    int sent_len = 0, sent_pos = 0;
 };
 
 static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -136,6 +146,13 @@ static void alsa_open(Plugin *w) {
         SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
     LOG("[maze_seq_vst] ALSA client '%s' port %d\n", name, w->seq_port);
 }
+static bool was_just_sent(Plugin *w, const uint8_t *m) {   /* status+note only: the loopback quantises velocity (see Acid) */
+    for (int i = 0; i < w->sent_len; i++) {
+        int idx = (w->sent_pos - 1 - i + 16) % 16;
+        if (w->sent_ring[idx][0] == m[0] && w->sent_ring[idx][1] == m[1]) { w->sent_ring[idx][0] = 0xFF; return true; }
+    }
+    return false;
+}
 static void alsa_flush(Plugin *w) {   /* send and empty w->out; called with w->lock held (UI and audio threads both get here) */
     int n = w->out.n;
     w->out.n = 0;
@@ -145,6 +162,10 @@ static void alsa_flush(Plugin *w) {   /* send and empty w->out; called with w->l
 #ifdef MAZE_VST_TEST
         if (type == 0x90 && m[2] > 0) g_note_ons[ch]++;
 #endif
+        if (type == 0x90 || type == 0x80) {
+            w->sent_ring[w->sent_pos][0] = m[0]; w->sent_ring[w->sent_pos][1] = m[1];
+            w->sent_pos = (w->sent_pos + 1) % 16; if (w->sent_len < 16) w->sent_len++;
+        }
         if (!w->seq || w->seq_port < 0) continue;
         snd_seq_event_t ev;
         snd_seq_ev_clear(&ev);
@@ -377,9 +398,23 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
         return 1;
     }
     case effSetSampleRate: case effSetBlockSize: case effMainsChanged: return 1;
-    case effProcessEvents: return 1;   /* the sequencer takes no MIDI input (the core ignores notes) */
+    case effProcessEvents: {   /* a played note transposes the pattern: semitones from C4 (the core's pad_semis) */
+        VstEvents *ev = (VstEvents *)p;
+        for (int i = 0; i < ev->numEvents; i++) {
+            if (ev->events[i]->type != 1) continue;
+            const uint8_t *d = ((VstMidiEvent *)ev->events[i])->midiData;
+            if ((d[0] & 0xF0) != 0x90 || d[2] == 0) continue;
+            std::lock_guard<std::mutex> lk(w->lock);
+            if (was_just_sent(w, d)) continue;
+            int semis = (int)d[1] - 60; semis = semis < -24 ? -24 : semis > 24 ? 24 : semis;
+            char b[16]; std::snprintf(b, sizeof b, "%d", semis);
+            g_api->set_param(w->inst, "pad_semis", b);
+        }
+        return 1;
+    }
     case effCanDo:
-        return (!std::strcmp((char *)p, "receiveVstTimeInfo")) ? 1 : -1;
+        return (!std::strcmp((char *)p, "receiveVstEvents") || !std::strcmp((char *)p, "receiveVstMidiEvent") ||
+                !std::strcmp((char *)p, "receiveVstTimeInfo")) ? 1 : -1;
     case effGetChunk: {
         std::string s;
         for (int i = 0; i < NPARAMS; i++) {
@@ -417,6 +452,14 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
     }
 }
 
+#ifdef MAZE_VST_TEST
+extern "C" int maze_vst_pad_semis(AEffect *e) {   /* host_test.c: the transpose the core holds, read from its state JSON */
+    Plugin *w = (Plugin *)e; char buf[1024];
+    { std::lock_guard<std::mutex> lk(w->lock); g_api->get_param(w->inst, "state", buf, sizeof buf); }
+    const char *k = std::strstr(buf, "\"pad_semis\":\"");
+    return k ? std::atoi(k + 13) : -999;
+}
+#endif
 extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
     if (!g_log) g_log = std::fopen("/tmp/maze_seq_vst.log", "a");
     {

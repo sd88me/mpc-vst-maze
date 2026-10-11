@@ -31,6 +31,7 @@ struct TransportGrid {
 
         double blk = frames * (tempo > 0 ? tempo : 120.0) / (60.0 * (sample_rate > 0 ? sample_rate : 44100.0));
         double start = last_ppq, end = ppq;
+        if (end < start && start - end < 1.0) return;   /* tempo change: the host's ppq steps back a little then crawls on; hold the high-water mark (a loop wrap is far more than a beat) */
         if (end < start) { start = end - blk; need_sync = true; }        /* loop wrap: re-cover the block holding the loop start */
         else if (end - start > 1.0) { start = end - blk; need_sync = true; }   /* locate forward: re-announce, no flood */
         last_ppq = ppq;

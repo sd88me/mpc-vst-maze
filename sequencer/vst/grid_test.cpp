@@ -83,6 +83,20 @@ int main() {
       printf("dropped pulse: %d note-ons after the next bar are off the grid\n", bad);
       CHECK(bad == 0, "not healed: %d", bad);
       api->destroy_instance(inst); }
+    int lurch_bad = 0; for (long T = 1000; T < 1060; T++) { TransportGrid g; struct E { std::vector<long> v; void start() {} void stop() {} void songpos(long) {} void pulse(long m) { v.push_back(m); } } e;
+      double ph = 0; bool ok = true;   // tempo change: ppq steps back ~0.07 beat, crawls, lurches ahead; no pulse may repeat or go backwards
+      for (long k = 0; k < 6000; k++) {
+          if (k < T) ph = k * ppb();
+          else if (k == T) ph = T * ppb() - 0.07;
+          else if (k < T + 150) ph += ppb() * 0.2;
+          else if (k == T + 150) ph += 0.4;
+          else ph += ppb();
+          g.block(e, true, ph, tempo, sr, 128);
+      }
+      for (size_t i = 1; i < e.v.size(); i++) if (e.v[i] <= e.v[i - 1]) ok = false;
+      if (!ok) lurch_bad++; }
+    printf("tempo lurch: %d of 60 phases repeated/reversed a pulse\n", lurch_bad);
+    CHECK(lurch_bad == 0, "pulses repeated across the tempo change");
     printf("%s\n", fails ? "GRID FAILED" : "GRID OK");
     return fails ? 1 : 0;
 }
