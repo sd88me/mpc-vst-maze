@@ -36,12 +36,37 @@ static double loop4(long k) { return std::fmod(k * ppb(), 4.0); }
 static double from33(long k) { return 3.3 + k * ppb(); }
 static double locate(long k) { double p = k * ppb(); return p < 2.0 ? p : 40.0 + (p - 2.0); }
 static double lin(long k) { return k * ppb(); }
+// as measured on a Force (MPC OS 3.9.1): block positions wobble by up to -0.0009/+0.0002 beat, on the wrapped position
+static double jit(long k) { unsigned h = (unsigned)k * 2654435761u; return ((h >> 8) % 1101) / 1e6 - 0.0009; }
+static double loop4j(long k) { return std::fmod(k * ppb(), 4.0) + (k ? jit(k) : 0.0); }
 
-static void run(plugin_api_v2_t *api, void *inst, double (*pos)(long), long blocks, int rate_idx, long drop_at = -1) {
+// Pulses alone: each one goes out with the block it belongs to, [p, p + blk) (ahead of time, never a block late; L earlier for
+// the loop start's), and over 50 loops every 3-pulse sync point comes exactly once and in order.
+static void pulse_grid(double (*pos)(long), bool report, double tol, const char *name) {
+    TransportGrid g; struct E { std::vector<long> v; void start() {} void stop() {} void songpos(long) {} void pulse(long m) { v.push_back(m); } } e;
+    double blk = ppb(); long blocks = (long)(4.0 * 50 / blk); int late = 0;
+    for (long k = 0; k < blocks; k++) {
+        double p = pos(k); size_t n0 = e.v.size();
+        g.block(e, true, p, tempo, sr, 128, 0.0, report ? 4.0 : 0.0);
+        for (size_t i = n0; i < e.v.size(); i++) {
+            double q = e.v[i] / 24.0, lo = p - std::max(tol, 0.0021), hi = p + blk + tol;
+            if (report && !((q >= lo && q < hi) || (q + 4.0 >= lo && q + 4.0 < hi))) late++;
+        }
+    }
+    long beats = 0, order = 0;
+    for (size_t i = 0; i < e.v.size(); i++) if (e.v[i] % 24 == 0) beats++;
+    for (size_t i = 1; i < e.v.size(); i++) { long a = e.v[i - 1] % 96, b = e.v[i] % 96; if (b != (a + 1) % 96 && !(report == false && b > a)) order++; }
+    printf("%s: %ld beat pulses (expect 200, within 1), %d out of their block, %ld order breaks\n", name, beats, late, order);
+    CHECK(std::labs(beats - 200) <= 1, "%s: %ld beat pulses", name, beats);
+    CHECK(late == 0, "%s: %d pulses out of their block", name, late);
+    CHECK(!report || order == 0, "%s: %ld order breaks", name, order);
+}
+
+static void run(plugin_api_v2_t *api, void *inst, double (*pos)(long), long blocks, int rate_idx, long drop_at = -1, double L = 0.0) {
     TransportGrid g; Clock c{api, inst};
     char b[8]; std::snprintf(b, sizeof b, "%d", rate_idx); api->set_param(inst, "note_rate", b);
     g_on.clear(); g_off = g_ons = 0; g_m = -1;
-    for (long k = 0; k < blocks; k++) { if (k == drop_at) c.drop = 2; g.block(c, true, pos(k), tempo, sr, 128); }
+    for (long k = 0; k < blocks; k++) { if (k == drop_at) c.drop = 2; g.block(c, true, pos(k), tempo, sr, 128, 0.0, L); }
     g.block(c, false, 0, tempo, sr, 128);   // stop -> all notes off
 }
 
@@ -55,7 +80,7 @@ int main() {
         // trig_mix/length defaults give notes; use a 4-beat loop for rates up to a beat, 16 for slower
         double (*pos)(long) = loop4;
         if (ri >= 4) { pos = lin; }
-        run(api, inst, pos, blocks, ri);
+        run(api, inst, pos, blocks, ri, -1, pos == loop4 ? 4.0 : 0.0);   // the loop reported, as MPC does
         int bad = 0; for (long m : g_on) if (m % RATE[ri] != 0) bad++;
         printf("rate %d pulses: %d note-ons, %d off the grid, %d note-offs\n", RATE[ri], g_ons, bad, g_off);
         CHECK(g_ons > 4, "rate %d produced %d notes", RATE[ri], g_ons);
@@ -83,6 +108,9 @@ int main() {
       printf("dropped pulse: %d note-ons after the next bar are off the grid\n", bad);
       CHECK(bad == 0, "not healed: %d", bad);
       api->destroy_instance(inst); }
+    pulse_grid(loop4, true, 1e-6, "reported loop");
+    pulse_grid(loop4j, true, 0.001, "reported loop, jittered ppq");
+    pulse_grid(loop4, false, 1e-6, "unreported loop");
     int lurch_bad = 0; for (long T = 1000; T < 1060; T++) { TransportGrid g; struct E { std::vector<long> v; void start() {} void stop() {} void songpos(long) {} void pulse(long m) { v.push_back(m); } } e;
       double ph = 0; bool ok = true;   // tempo change: ppq steps back ~0.07 beat, crawls, lurches ahead; no pulse may repeat or go backwards
       for (long k = 0; k < 6000; k++) {

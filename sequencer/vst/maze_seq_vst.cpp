@@ -74,7 +74,8 @@ enum {
     effGetVendorVersion = 49, effCanDo = 51, effGetVstVersion = 58,
 };
 enum { audioMasterAutomate = 0, audioMasterGetTime = 7 };
-enum { kVstTransportPlaying = 1 << 1, kVstPpqPosValid = 1 << 9, kVstTempoValid = 1 << 10 };
+enum { kVstTransportPlaying = 1 << 1, kVstTransportCycleActive = 1 << 2, kVstPpqPosValid = 1 << 9, kVstTempoValid = 1 << 10,
+       kVstCyclePosValid = 1 << 12 };
 enum { effFlagsCanReplacing = 1 << 4, effFlagsProgramChunks = 1 << 5, effFlagsIsSynth = 1 << 8 };
 
 /* ---------------------------------------------------------------------------
@@ -272,7 +273,7 @@ struct CoreClock {
     void pulse(long) { core_midi(w, 0xF8); }
 };
 static void feed_transport(Plugin *w, int32_t frames) {
-    VstTimeInfo *ti = (VstTimeInfo *)w->master(&w->fx, audioMasterGetTime, 0, kVstTempoValid | kVstPpqPosValid, 0, 0);
+    VstTimeInfo *ti = (VstTimeInfo *)w->master(&w->fx, audioMasterGetTime, 0, kVstTempoValid | kVstPpqPosValid | kVstCyclePosValid, 0, 0);
     bool playing = ti && (ti->flags & kVstTransportPlaying);
     if (ti && (ti->flags & kVstTempoValid) && ti->tempo >= 20 && std::fabs((float)ti->tempo - w->sent_bpm) > 0.01f) {
         char b[16];
@@ -281,7 +282,9 @@ static void feed_transport(Plugin *w, int32_t frames) {
         core_set(w, "host_bpm", b);   /* LFO sync tempo (MAZE_VST patch) */
     }
     CoreClock clk{w};
-    w->grid.block(clk, playing, ti ? ti->ppqPos : 0.0, ti ? ti->tempo : 120.0, ti ? ti->sampleRate : 44100.0, frames);
+    bool cycle = ti && (ti->flags & kVstTransportCycleActive) && (ti->flags & kVstCyclePosValid);   /* MPC's loop (transport_grid.h) */
+    w->grid.block(clk, playing, ti ? ti->ppqPos : 0.0, ti ? ti->tempo : 120.0, ti ? ti->sampleRate : 44100.0, frames,
+                  cycle ? ti->cycleStartPos : 0.0, cycle ? ti->cycleEndPos : 0.0);
 }
 
 /* ---------------------------------------------------------------------------
