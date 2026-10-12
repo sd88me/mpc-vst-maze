@@ -13,29 +13,59 @@
  *   void pulse(long m);     // 0xF8 (m = its song-position index, for tests)
  * Same scheme as mpc-vst-euclidier / mpc-vst-acid; guide: mpc-vst-plugins docs/MIDI_TIMING.md. */
 #pragma once
+#include <algorithm>
 #include <cmath>
 
 struct TransportGrid {
     static const long kSync = 3;   /* pulses: the finest step the core has (32nd notes) */
-    double last_ppq = 0.0;
+    double sent_to = 0.0;          /* high-water mark: pulses before this song position have been sent */
     bool was_playing = false;
     bool need_sync = false;
     bool need_start = false;
 
+    /* Once per audio block. ppq = ppqPos at the start of this block. The pulses of THIS block, [ppq, ppq + blk), go to the
+     * core now, at its start (as StepRunner-8 does), so its notes leave up to a block early instead of a block late; MPC's MIDI
+     * input comes after the plugin, so earlier is closer to the grid (Euclidier user report: track delay needed to line up).
+     * Looking ahead runs into the loop end: on a Force (MPC OS 3.9.1) the block before a wrap covers the loop end and the next
+     * reports a position just after the loop start. MPC reports the loop (cycleStartPos/cycleEndPos, cycle flags), so
+     * loop_start/loop_end (loop_end <= loop_start: no loop) cut the block there: up to the loop end, then the loop start is
+     * announced and the rest goes from there. */
     template <class E>
-    void block(E &e, bool playing, double ppq, double tempo, double sample_rate, int frames) {
-        if (playing && !was_playing) { last_ppq = ppq; need_sync = need_start = true; }
+    void block(E &e, bool playing, double ppq, double tempo, double sample_rate, int frames,
+               double loop_start = 0.0, double loop_end = 0.0) {
+        if (playing && !was_playing) { sent_to = ppq; need_sync = need_start = true; }
         else if (!playing && was_playing) { e.stop(); need_sync = need_start = false; }
         was_playing = playing;
         if (!playing) return;
 
         double blk = frames * (tempo > 0 ? tempo : 120.0) / (60.0 * (sample_rate > 0 ? sample_rate : 44100.0));
-        double start = last_ppq, end = ppq;
-        if (end < start && start - end < 1.0) return;   /* tempo change: the host's ppq steps back a little then crawls on; hold the high-water mark (a loop wrap is far more than a beat) */
-        if (end < start) { start = end - blk; need_sync = true; }        /* loop wrap: re-cover the block holding the loop start */
-        else if (end - start > 1.0) { start = end - blk; need_sync = true; }   /* locate forward: re-announce, no flood */
-        last_ppq = ppq;
+        double start = sent_to, end = ppq + blk;
+        /* ppq behind what was sent by less than a beat: block jitter (MPC's ppq wobbles up to 0.0009 beat) or a tempo change (the
+         * host's ppq steps back a little then crawls on); hold the high-water mark, so nothing plays twice. By more: a wrap the
+         * loop range did not announce, or a locate. The block before was covered by the look-ahead, so carry on from here, less
+         * a little more than the jitter (a wrap reported at 0.0001 still plays the loop start's pulse) -- except after a wrap the
+         * host did not report: the look-ahead may already have sent that pulse (under the pre-wrap position). */
+        if (std::fabs(ppq - sent_to) > 1.0) {
+            bool in_loop = loop_end > loop_start && ppq >= loop_start - 0.002 && ppq < loop_end;
+            start = in_loop ? std::max(ppq - 0.002, loop_start) : ppq < sent_to ? ppq : ppq - 0.002;
+            need_sync = true;
+        }
+        if (end <= start) return;
 
+        if (loop_end > loop_start + 0.25 && ppq >= loop_start && ppq < loop_end && end > loop_end) {
+            pulses(e, start, loop_end);
+            need_sync = true;                          /* the loop start is announced before its first pulse */
+            sent_to = loop_start + (end - loop_end);
+            pulses(e, loop_start, sent_to);
+        } else {
+            pulses(e, start, end);
+            sent_to = end;
+        }
+    }
+
+private:
+    template <class E>
+    void pulses(E &e, double start, double end) {
         for (long m = (long)std::ceil(start * 24.0 - 1e-9); m / 24.0 < end - 1e-9; m++) {
             if (m < 0) continue;                       /* count-in / pre-roll */
             if (need_sync) {
