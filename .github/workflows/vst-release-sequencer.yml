@@ -17,13 +17,13 @@ on:
 
 jobs:
   maze-sequencer:
-    uses: sd88me/mpc-vst-plugins/.github/workflows/vst-release.yml@a4b8f861d07153a2b387d7520331f532f7247502
+    uses: sd88me/mpc-vst-plugins/.github/workflows/vst-release.yml@b6e2197731fc7cc4dd491d34c4a83c4348c3babc
     permissions:
       contents: write
     with:
       tag: maze-sequencer-vst-v${{ inputs.version }}
       version: ${{ inputs.version }}
-      tools_ref: a4b8f861d07153a2b387d7520331f532f7247502
+      tools_ref: b6e2197731fc7cc4dd491d34c4a83c4348c3babc
       vst_dir: sequencer/vst
       plugin_id: maze-sequencer
       license: MIT

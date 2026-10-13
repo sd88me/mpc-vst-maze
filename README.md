@@ -143,7 +143,7 @@ To test the build offline on x86 (ASan/UBSan, no device needed), run:
 
 ## Installation
 
-Download `Maze-Voice-<version>-mpc-armv7.zip` from
+Download `Maze-Voice-<version>-mpc-armv7.zip` (Gen1: Force, MPC Live / Live II, One, X, Key 61) or `Maze-Voice-<version>-mpc-aarch64.zip` (Gen2, e.g. MPC Live III; MPC OS 3.x only; built and host-tested offline, not yet run on a Gen2 unit) from
 [Releases](https://github.com/sd88me/mpc-vst-maze/releases) and unzip it.
 Then copy the folder to the device and run its installer:
 
@@ -266,7 +266,7 @@ that the channel matches.
 Build with `sequencer/vst/build.sh` and test offline with `sequencer/vst/test.sh`. Its core is vendored from
 [force-maze](https://github.com/sd88me/force-maze) (see `sequencer/src/VENDORED.md`), and `sequencer/vst/maze_seq_vst.cpp`
 is the plugin wrapper. The release workflow is **VST release - Maze Sequencer (draft)**, and installation works the same
-way as Maze Voice, using `Maze-Sequencer-<version>-mpc-armv7.zip`.
+way as Maze Voice, using `Maze-Sequencer-<version>-mpc-armv7.zip` (Gen1) or `Maze-Sequencer-<version>-mpc-aarch64.zip` (Gen2, untested on a device).
 
 ## License
 
