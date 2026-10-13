@@ -36,3 +36,18 @@ docker run --rm --platform linux/arm/v7 -v "$PWD/..":/b -w /b/vst arm32v7/gcc:11
   chown -R '"$U"' build
 '
 md5sum build/maze_seq.so
+
+# 4. Gen2 (aarch64, MPC OS 3.x only, glibc 2.39): same sources, built in an arm64 container into build/aarch64/ (docs/GEN2.md)
+docker run --rm --platform linux/arm64 -v "$PWD/..":/b -w /b/vst arm64v8/gcc:12-bookworm bash -euxc '
+  apt-get update -qq && apt-get install -y -qq libasound2-dev >/dev/null
+  mkdir -p build/obj64 build/aarch64
+  gcc -O2 -fPIC -fvisibility=hidden -std=gnu11 -DMAZE_LFO=1 -DMAZE_VST=1 -I../src -c ../src/maze_seq_core.c -o build/obj64/core.o
+  g++ -O2 -fPIC -fvisibility=hidden -std=c++17 -Wall -Wextra -Wno-unused-parameter \
+      -I../src -Ibuild -c maze_seq_vst.cpp -o build/obj64/vst.o
+  g++ -shared -o build/aarch64/maze_seq.so build/obj64/core.o build/obj64/vst.o \
+      -static-libstdc++ -static-libgcc -Wl,--no-undefined -lasound -lpthread -lm
+  strip build/aarch64/maze_seq.so
+  readelf -h build/aarch64/maze_seq.so | grep Machine
+  chown -R '"$U"' build
+'
+md5sum build/aarch64/maze_seq.so

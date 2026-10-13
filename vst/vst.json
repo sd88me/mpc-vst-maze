@@ -4,6 +4,7 @@
   "uid": "MzVc",
   "version": 1000,
   "so": "maze_voice.so",
+  "targets": ["armv7", "aarch64"],
   "module": "../module.json",
   "layout": "layout.conf",
   "art": "html",
