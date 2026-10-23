@@ -36,5 +36,12 @@
   "firmware": "MPC OS 3.9.1",
   "date": "2026-10-15",
   "note": "Verified working on a Gen2 device on MPC OS 3.9.1."
+ },
+ {
+  "version": "1.0.5",
+  "device": "Akai Force",
+  "firmware": "MPC OS 3.9.1",
+  "date": "2026-10-23",
+  "note": "Maze Voice."
  }
 ]
