@@ -16,8 +16,18 @@
  * parameter itself (cache[]); only the step bits are read back from the core, since "flip"
  * and "regen" change them. The pattern (bits + CV) travels in the project chunk as the
  * core's "pattern" string (MAZE_VST patch, see src/VENDORED.md).
+ *
+ * Threads: the audio thread owns the core. The host/UI threads never call into it: setParameter,
+ * note events and setChunk put commands on a lock-free ring (push), the audio thread applies them
+ * at the start of its next block (drain) and publishes what the screen shows (step bits, play-head)
+ * as atomics. The audio thread never takes a lock. When no block has run for 60 ms (host stopped,
+ * plugin bypassed) the calling UI thread takes over ownership for a moment (idle_sync) so edits
+ * still apply; getChunk and the test hooks do the same (with_core). A block that finds the core
+ * taken is skipped; TransportGrid's high-water mark sends its pulses with the next block.
  * ========================================================================== */
 #include <atomic>
+#include <chrono>
+#include <sched.h>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -105,16 +115,32 @@ extern "C" int maze_vst_note_ons(int ch) { return g_note_ons[ch & 15].load(); }
 /* ---------------------------------------------------------------------------
  * Per-instance state
  * ------------------------------------------------------------------------- */
+struct Cmd { int kind = 0, a = 0, b = 0; char key[24] = {0}; char val[272] = {0}; };
+enum { kSet = 1, kFire, kStep, kSemis };   /* ring commands: set_param, momentary "1", step on/off, played note */
+struct AF {   /* a float several threads touch: relaxed atomic, reads and writes like a plain float */
+    std::atomic<float> v{0.0f};
+    operator float() const { return v.load(std::memory_order_relaxed); }
+    AF &operator=(float x) { v.store(x, std::memory_order_relaxed); return *this; }
+};
+static long now_ms() { return (long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+
 struct Plugin {
     AEffect fx;
     audioMasterCallback master;
     void *inst = nullptr;
-    std::mutex lock;               /* serialises every call into the core */
+    std::atomic<bool> busy{false};         /* whoever holds it owns the core (audio thread, or idle_sync/with_core) */
+    std::atomic<long> last_block_ms{0};    /* when the audio thread last ran a block */
+    static const unsigned kRing = 512;
+    Cmd ring[kRing];
+    std::atomic<unsigned> head{0}, tail{0};
+    std::atomic_flag prod = ATOMIC_FLAG_INIT;   /* producers (host and UI threads) take turns; only the owner consumes */
+    std::atomic<int> sbits[2][8];          /* published: step bits, play-head (-1 before the first step) */
+    std::atomic<int> splay[2];
     Outbox out;
     int run_idx[2] = {-1, -1};     /* param index of s1_run / s2_run */
     int step_idx[2][8];            /* param index of s?_step0..7 */
     int last_bits[2][8];           /* step bits the host was last told (-1: not yet read) */
-    float cache[NPARAMS];          /* every parameter's value in its own domain (option index / number) */
+    AF cache[NPARAMS];             /* every parameter's value in its own domain (option index / number) */
     volatile int release[NPARAMS] = {0};
     bool held[NPARAMS] = {false};  /* momentary params: host currently reports them pressed */
     float open[NPARAMS] = {0};     /* popup "open" flags (popup.h): wrapper-only, not saved */
@@ -154,7 +180,7 @@ static bool was_just_sent(Plugin *w, const uint8_t *m) {   /* status+note only: 
     }
     return false;
 }
-static void alsa_flush(Plugin *w) {   /* send and empty w->out; called with w->lock held (UI and audio threads both get here) */
+static void alsa_flush(Plugin *w) {   /* send and empty w->out; owner only: the thread holding w->busy */
     int n = w->out.n;
     w->out.n = 0;
     for (int i = 0; i < n; i++) {
@@ -197,28 +223,88 @@ static void alsa_close(Plugin *w) {
     w->seq = nullptr;
 }
 
-/* ---- calls into the core --------------------------------------------------- */
+/* ---- calls into the core: owner only (the audio thread, or whoever holds w->busy) ---------------- */
 static void core_midi(Plugin *w, uint8_t byte) {
-    std::lock_guard<std::mutex> lk(w->lock);
     t_out = &w->out; g_api->on_midi(w->inst, &byte, 1, 2); t_out = nullptr;
     alsa_flush(w);
 }
 static void core_set(Plugin *w, const char *key, const char *val) {
-    std::lock_guard<std::mutex> lk(w->lock);
     t_out = &w->out; g_api->set_param(w->inst, key, val); t_out = nullptr;
     alsa_flush(w);
 }
 static int core_bits(Plugin *w, int seq, int bits[8]) {   /* "<len>|1,0,..|<play>": the bits; returns the play-head (-1 before the first step) */
     char buf[96], key[16];
     std::snprintf(key, sizeof key, "s%d_state", seq + 1);
-    int n;
-    { std::lock_guard<std::mutex> lk(w->lock); n = g_api->get_param(w->inst, key, buf, sizeof buf); }
+    int n = g_api->get_param(w->inst, key, buf, sizeof buf);
     for (int i = 0; i < 8; i++) bits[i] = 0;
     if (n <= 0) return -1;
     const char *p = std::strchr(buf, '|');
     for (int i = 0; p && i < 8; i++) { p++; bits[i] = *p == '1'; p = std::strchr(p, ','); if (!p) break; }
     const char *q = std::strrchr(buf, '|');
     return q && q != std::strchr(buf, '|') ? std::atoi(q + 1) : -1;
+}
+static int publish_line(Plugin *w, int seq, int b[8]) {   /* owner: read the line and publish it for the screen */
+    int pl = core_bits(w, seq, b);
+    for (int i = 0; i < 8; i++) w->sbits[seq][i].store(b[i], std::memory_order_relaxed);
+    w->splay[seq].store(pl, std::memory_order_relaxed);
+    return pl;
+}
+static void snap_bits(Plugin *w, int seq, int bits[8]) { for (int i = 0; i < 8; i++) bits[i] = w->sbits[seq][i].load(std::memory_order_relaxed); }
+
+/* ---- commands from the host/UI threads: lock-free ring, applied by the owner ----------------------- */
+static void drain(Plugin *w) {   /* owner */
+    unsigned t = w->tail.load(std::memory_order_relaxed);
+    for (int budget = 128; budget-- > 0 && t != w->head.load(std::memory_order_acquire);) {   /* a burst never holds one block for long */
+        const Cmd &c = w->ring[t % Plugin::kRing];
+        switch (c.kind) {
+        case kSet: core_set(w, c.key, c.val); break;
+        case kFire: core_set(w, c.key, "1"); break;
+        case kStep: {   /* a = line, b = idx * 2 + wanted */
+            int bits[8]; core_bits(w, c.a, bits);
+            if (bits[c.b >> 1] != (c.b & 1)) { char n[8]; std::snprintf(n, sizeof n, "%d", c.b >> 1); core_set(w, c.a ? "s2_flip" : "s1_flip", n); }
+            break;
+        }
+        case kSemis: {   /* a = status, b = note: a played note transposes, unless it is our own note echoed back */
+            uint8_t d[2] = { (uint8_t)c.a, (uint8_t)c.b };
+            if (was_just_sent(w, d)) break;
+            int semis = c.b - 60; semis = semis < -24 ? -24 : semis > 24 ? 24 : semis;
+            char b[16]; std::snprintf(b, sizeof b, "%d", semis);
+            g_api->set_param(w->inst, "pad_semis", b);
+            break;
+        }
+        }
+        w->tail.store(++t, std::memory_order_release);
+    }
+}
+static bool ring_full(Plugin *w) { return w->head.load() - w->tail.load() >= Plugin::kRing; }
+static void idle_sync(Plugin *w, bool force = false);
+static void push(Plugin *w, int kind, const char *key, const char *val, int a = 0, int b = 0) {   /* any thread but the owner's loop */
+    for (int tries = 0; ring_full(w) && tries < 200; tries++) { idle_sync(w, false); sched_yield(); }   /* never blocks the audio thread */
+    while (w->prod.test_and_set(std::memory_order_acquire)) sched_yield();
+    unsigned h = w->head.load(std::memory_order_relaxed);
+    if (h - w->tail.load(std::memory_order_acquire) < Plugin::kRing) {
+        Cmd &c = w->ring[h % Plugin::kRing];
+        c.kind = kind; c.a = a; c.b = b;
+        std::snprintf(c.key, sizeof c.key, "%s", key ? key : "");
+        std::snprintf(c.val, sizeof c.val, "%s", val ? val : "");
+        w->head.store(h + 1, std::memory_order_release);
+    }
+    w->prod.clear(std::memory_order_release);
+    idle_sync(w);
+}
+/* No audio block for 60 ms: take the core for a moment so edits still apply and the screen still follows. */
+static void idle_sync(Plugin *w, bool force) {
+    if (!force && now_ms() - w->last_block_ms.load() < 60) return;
+    if (w->busy.exchange(true)) return;
+    drain(w);
+    int b[8]; publish_line(w, 0, b); publish_line(w, 1, b);
+    w->busy.store(false);
+}
+template <class F> static void with_core(Plugin *w, F fn) {   /* a non-audio thread needing the core now (getChunk, tests): waits for the audio thread, never the reverse */
+    while (w->busy.exchange(true)) sched_yield();
+    drain(w);
+    fn();
+    w->busy.store(false);
 }
 
 /* a parameter's step bit lives in the core: s1_step3 -> (0, 3) */
@@ -239,7 +325,7 @@ static float from_norm(const param_t *p, float n) {
 static bool is_run(const param_t *p) { return !std::strcmp(p->key, "s1_run") || !std::strcmp(p->key, "s2_run"); }
 static float value_of(Plugin *w, int i) {   /* param domain */
     int seq, idx;
-    if (is_step(&PARAMS[i], &seq, &idx)) { int b[8]; core_bits(w, seq, b); return (float)b[idx]; }
+    if (is_step(&PARAMS[i], &seq, &idx)) return (float)w->sbits[seq][idx].load(std::memory_order_relaxed);
     return w->cache[i];
 }
 
@@ -249,16 +335,12 @@ static void apply(Plugin *w, int i, float v) {
     char buf[32];
     int seq, idx;
     if (is_run(p)) return;   /* display only */
-    if (is_step(p, &seq, &idx)) {
-        int b[8];
-        core_bits(w, seq, b);
-        if (b[idx] != (int)v) { std::snprintf(buf, sizeof buf, "%d", idx); core_set(w, seq ? "s2_flip" : "s1_flip", buf); }
-        return;
-    }
+    if (is_step(p, &seq, &idx)) { push(w, kStep, "", "", seq, idx * 2 + ((int)v ? 1 : 0)); w->sbits[seq][idx].store((int)v ? 1 : 0); return; }
+    if (w->cache[i] == v) return;   /* nothing changed: a drag that re-sends a value costs the audio thread nothing */
     w->cache[i] = v;
     if (!std::strcmp(p->key, "s1_channel") || !std::strcmp(p->key, "s2_channel")) v -= 1;   /* 1..16 -> 0..15 */
     std::snprintf(buf, sizeof buf, "%d", (int)v);
-    core_set(w, p->key, buf);
+    push(w, kSet, p->key, buf);
 }
 
 /* ---------------------------------------------------------------------------
@@ -293,12 +375,15 @@ static void feed_transport(Plugin *w, int32_t frames) {
 static void processReplacing(AEffect *e, float **in, float **out, int32_t n) {
     (void)in;
     Plugin *w = (Plugin *)e->object;
+    for (int32_t i = 0; i < n; i++) out[0][i] = out[1][i] = 0.0f;   /* MIDI generator: no audio */
+    if (w->busy.exchange(true)) return;   /* the core is held for a moment (getChunk): its pulses go out with the next block */
+    drain(w);
     feed_transport(w, n);
     for (int n2 = 0; n2 < 2; n2++) {
         /* The host does not re-read a toggle or ring by itself, so push what changed on its own (jv880's highlight
          * mechanism): the running light as the play-head moves, and step LEDs when the pattern changes (Advance,
          * Reset, Corrupt). Cheap: one state read per line per block. */
-        int b[8], pl = core_bits(w, n2, b);
+        int b[8], pl = publish_line(w, n2, b);
         for (int i = 0; i < 8; i++) {
             if (w->last_bits[n2][i] >= 0 && w->last_bits[n2][i] != b[i] && w->step_idx[n2][i] >= 0)
                 w->master(&w->fx, audioMasterAutomate, w->step_idx[n2][i], 0, 0, (float)b[i]);
@@ -314,7 +399,8 @@ static void processReplacing(AEffect *e, float **in, float **out, int32_t n) {
     }
     for (int i = 0; i < NPARAMS; i++)
         if (w->release[i]) { w->release[i] = 0; w->held[i] = false; w->master(&w->fx, audioMasterAutomate, i, 0, 0, 0.0f); }
-    for (int32_t i = 0; i < n; i++) out[0][i] = out[1][i] = 0.0f;   /* MIDI generator: no audio */
+    w->last_block_ms.store(now_ms());
+    w->busy.store(false);
 }
 
 static void setParameter(AEffect *e, int32_t i, float n) {
@@ -326,7 +412,7 @@ static void setParameter(AEffect *e, int32_t i, float n) {
         bool down = n > 0.5f;
         bool rising = down && !w->held[i];   /* an echo of our own automate must not re-fire the trigger */
         w->held[i] = down;
-        if (rising) { core_set(w, p->key, "1"); w->release[i] = 1; }
+        if (rising) { push(w, kFire, p->key, ""); w->release[i] = 1; }
         return;
     }
     bool nudge = false;
@@ -366,10 +452,10 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
     switch (op) {
     case effOpen: return 1;
     case effClose:
-        { std::lock_guard<std::mutex> lk(w->lock);
-          t_out = &w->out; g_api->destroy_instance(w->inst); t_out = nullptr;
-          alsa_flush(w);   /* the core's final note-off */
-          alsa_close(w); }
+        while (w->busy.exchange(true)) sched_yield();   /* never released: the plugin is going away */
+        t_out = &w->out; g_api->destroy_instance(w->inst); t_out = nullptr;
+        alsa_flush(w);   /* the core's final note-off */
+        alsa_close(w);
         delete w;
         return 1;
     case effGetPlugCategory: return 2; /* kPlugCategSynth */
@@ -407,11 +493,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
             if (ev->events[i]->type != 1) continue;
             const uint8_t *d = ((VstMidiEvent *)ev->events[i])->midiData;
             if ((d[0] & 0xF0) != 0x90 || d[2] == 0) continue;
-            std::lock_guard<std::mutex> lk(w->lock);
-            if (was_just_sent(w, d)) continue;
-            int semis = (int)d[1] - 60; semis = semis < -24 ? -24 : semis > 24 ? 24 : semis;
-            char b[16]; std::snprintf(b, sizeof b, "%d", semis);
-            g_api->set_param(w->inst, "pad_semis", b);
+            push(w, kSemis, "", "", d[0], d[1]);   /* the owner drops it if it is our own note echoed back */
         }
         return 1;
     }
@@ -429,7 +511,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
         }
         char pat[256];
         int n;
-        { std::lock_guard<std::mutex> lk(w->lock); n = g_api->get_param(w->inst, "pattern", pat, sizeof pat); }
+        with_core(w, [&] { n = g_api->get_param(w->inst, "pattern", pat, sizeof pat); });
         if (n > 0) { s += "pattern="; s += pat; s += ';'; }
         copy_str(w->chunk, s, sizeof w->chunk);
         *(void **)p = w->chunk;
@@ -448,7 +530,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
             for (int i = 0; i < NPARAMS; i++)
                 if (!std::strcmp(PARAMS[i].key, tok)) { apply(w, i, (float)std::atof(eq + 1)); break; }
         }
-        if (pattern) core_set(w, "pattern", pattern);   /* last: the bits and CV of both lines */
+        if (pattern) push(w, kSet, "pattern", pattern);   /* last: the bits and CV of both lines */
         return 1;
     }
     default: return 0;
@@ -458,7 +540,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
 #ifdef MAZE_VST_TEST
 extern "C" int maze_vst_pad_semis(AEffect *e) {   /* host_test.c: the transpose the core holds, read from its state JSON */
     Plugin *w = (Plugin *)e; char buf[1024];
-    { std::lock_guard<std::mutex> lk(w->lock); g_api->get_param(w->inst, "state", buf, sizeof buf); }
+    with_core(w, [&] { g_api->get_param(w->inst, "state", buf, sizeof buf); });
     const char *k = std::strstr(buf, "\"pad_semis\":\"");
     return k ? std::atoi(k + 13) : -999;
 }
@@ -481,6 +563,7 @@ extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMa
     for (int i = 0; i < NPARAMS; i++) { int sq, st; if (is_step(&PARAMS[i], &sq, &st)) w->step_idx[sq][st] = i; }
     for (int i = 0; i < NPARAMS; i++) { if (!std::strcmp(PARAMS[i].key, "s1_run")) w->run_idx[0] = i; if (!std::strcmp(PARAMS[i].key, "s2_run")) w->run_idx[1] = i; }
     alsa_open(w);
+    for (int q = 0; q < 2; q++) { int bb[8]; publish_line(w, q, bb); }
 
     AEffect *e = &w->fx;
     std::memset(e, 0, sizeof *e);
