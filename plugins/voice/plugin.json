@@ -1,0 +1,16 @@
+{
+  "name": "Maze Voice",
+  "manufacturer": "sd88me",
+  "version": "2.0.0",
+  "kind": "instrument",
+  "uid": "MzVc",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Synth",
+  "file32": "VST/maze-voice-arm32.so",
+  "file64": "VST/maze-voice-arm64.so",
+  "description": "Monophonic Moog Labyrinth-style thru-zero oscillator / wavefolder / state-variable filter voice, with two LFOs and a page randomiser.",
+  "author": "sd88me",
+  "url": "https://github.com/sd88me/mpc-vst-maze",
+  "license": "MIT"
+}

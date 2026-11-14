@@ -1,0 +1,16 @@
+{
+  "name": "Maze Sequencer",
+  "manufacturer": "sd88me",
+  "version": "2.0.0",
+  "kind": "instrument",
+  "uid": "MzSq",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Sequencer",
+  "file32": "VST/maze-sequencer-arm32.so",
+  "file64": "VST/maze-sequencer-arm64.so",
+  "description": "Dual 8-step generative sequencer (Moog Labyrinth style) with corrupt, scale quantising, two LFOs and per-line MIDI channels, driving other tracks over MIDI.",
+  "author": "sd88me",
+  "url": "https://github.com/sd88me/mpc-vst-maze",
+  "license": "MIT"
+}

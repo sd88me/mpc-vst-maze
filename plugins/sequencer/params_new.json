@@ -1,0 +1,58 @@
+[
+ {
+  "key": "s1_channel__open",
+  "name": "A MIDI CH List",
+  "unit": "",
+  "min": 0,
+  "max": 0,
+  "def": 0.0,
+  "nopts": 2,
+  "opts": [
+   "Closed",
+   "Open"
+  ],
+  "momentary": 0,
+  "string_display": 0,
+  "int_display": 0,
+  "step_target": -1,
+  "step_delta": 0.0,
+  "popup_of": 11,
+  "hold_ms": 0,
+  "dynamic_name": 0,
+  "dynamic_display": 0,
+  "qlink_ticks": 0,
+  "no_poll": 0,
+  "nudge_pct": 0,
+  "nudge_gain": 0,
+  "refresh_display": 0,
+  "debounce_ms": 0
+ },
+ {
+  "key": "s2_channel__open",
+  "name": "B MIDI CH List",
+  "unit": "",
+  "min": 0,
+  "max": 0,
+  "def": 0.0,
+  "nopts": 2,
+  "opts": [
+   "Closed",
+   "Open"
+  ],
+  "momentary": 0,
+  "string_display": 0,
+  "int_display": 0,
+  "step_target": -1,
+  "step_delta": 0.0,
+  "popup_of": 25,
+  "hold_ms": 0,
+  "dynamic_name": 0,
+  "dynamic_display": 0,
+  "qlink_ticks": 0,
+  "no_poll": 0,
+  "nudge_pct": 0,
+  "nudge_gain": 0,
+  "refresh_display": 0,
+  "debounce_ms": 0
+ }
+]

@@ -1,0 +1,7 @@
+build/
+plugins/*/build/
+plugins/.stage-*/
+plugins/*/skins/
+/dist/
+build/catalog/
+__pycache__/
