@@ -26,7 +26,7 @@ jobs:
       tools_ref: 8ee2ddb5a398c8c912560e906c1b4f051b6e49be
       vst_dir: sequencer/vst
       plugin_id: maze-sequencer
-      license: MIT
+      license: GPL-3.0-or-later
       build: SHADOW_SKIN_MPC_OS=2 bash sequencer/vst/build.sh
       host_test: sequencer/vst/test.sh
       about: Dual 8-step generative sequencer (Moog Labyrinth style) with corrupt, scale quantising, two LFOs and per-line MIDI channels, driving other tracks over MIDI.

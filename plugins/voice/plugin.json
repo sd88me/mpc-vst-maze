@@ -12,5 +12,5 @@
   "description": "Monophonic Moog Labyrinth-style thru-zero oscillator / wavefolder / state-variable filter voice, with two LFOs and a page randomiser.",
   "author": "sd88me",
   "url": "https://github.com/sd88me/mpc-vst-maze",
-  "license": "MIT"
+  "license": "GPL-3.0-or-later"
 }
