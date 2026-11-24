@@ -17,13 +17,13 @@ on:
 
 jobs:
   maze-voice:
-    uses: open-mpc/mpc-vst-plugins/.github/workflows/vst-release.yml@8ee2ddb5a398c8c912560e906c1b4f051b6e49be
+    uses: open-mpc/mpc-vst-plugins/.github/workflows/vst-release.yml@1777e405a4c15c380f7a1b1adf673dd73c1a0585
     permissions:
       contents: write
     with:
       tag: maze-voice-vst-v${{ inputs.version }}
       version: ${{ inputs.version }}
-      tools_ref: 8ee2ddb5a398c8c912560e906c1b4f051b6e49be
+      tools_ref: 1777e405a4c15c380f7a1b1adf673dd73c1a0585
       vst_dir: vst
       plugin_id: maze-voice
       license: GPL-3.0-or-later
