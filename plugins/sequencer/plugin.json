@@ -12,5 +12,5 @@
   "description": "Dual 8-step generative sequencer (Moog Labyrinth style) with corrupt, scale quantising, two LFOs and per-line MIDI channels, driving other tracks over MIDI.",
   "author": "sd88me",
   "url": "https://github.com/sd88me/mpc-vst-maze",
-  "license": "MIT"
+  "license": "GPL-3.0-or-later"
 }

@@ -30,7 +30,7 @@ PY
     printf '<PLUGIN name="%s" descriptiveName="%s" format="VST" category="Synth" manufacturer="sd88me" version="%s" file="%s" uid="%s" isInstrument="1" fileTime="0" infoUpdateTime="0" numInputs="0" numOutputs="2" isShell="0"/>\n' \
       "$NAME" "$NAME" "$VER" "$SO" "$UIDX" > "$st/entry.xml"
     python3 "$MPC_VST/tools/release.py" --so "$st/$SO" --skin "$st/$DIR" --entry "$st/entry.xml" --version "$VER" \
-      --repo sd88me/mpc-vst-maze --license MIT --id "$ID" --about "$ABOUT" -o "$st/dist"
+      --repo sd88me/mpc-vst-maze --license GPL-3.0-or-later --id "$ID" --about "$ABOUT" -o "$st/dist"
     cp "$st"/dist/*.zip "$out/$STEM-$VER-mpc-$cpu.zip"
   done
 }

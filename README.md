@@ -270,4 +270,4 @@ way as Maze Voice, using `Maze-Sequencer-<version>-mpc-armv7.zip` (Gen1) or `Maz
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Copyright © sd88me.
+Free software under the GNU General Public License, version 3 or later: see [LICENSE](LICENSE). It was MIT before 2026-11-24; code contributed under MIT keeps that notice ([LICENSE-MIT](LICENSE-MIT)).
