@@ -57,5 +57,9 @@
   "firmware": "MPC OS 3.10",
   "date": "2026-11-12",
   "note": "Maze Sequencer."
- }
+ },
+  {"version": "2.0.1", "device": "Akai MPC Live III (Gen2)", "firmware": "3.10", "date": "2026-11-24",
+   "note": "Maze Voice. Release zip installed on the unit from the draft release; loads, skin and sound checked."},
+  {"version": "2.0.1", "device": "Akai MPC Live III (Gen2)", "firmware": "3.10", "date": "2026-11-24",
+   "note": "Maze Sequencer. Release zip installed on the unit from the draft release; loads, skin and sound checked."}
 ]
